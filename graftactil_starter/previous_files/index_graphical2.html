@@ -1,0 +1,779 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>GrafTactil — Editor gráfico</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    body { padding: 18px; background:#f7f9fc; }
+    .card { margin-bottom:12px; }
+    .function-row { gap:10px; }
+    #preview img { max-width:100%; border:1px solid #ddd; background:#fff; padding:6px; }
+    .small-muted { font-size:0.85rem; color:#6c757d; }
+    #viewer { width:100%; height:480px; background:#e9eef6; border:1px solid #ddd; }
+    .loader { display:inline-block; width:18px; height:18px; border:2px solid #ccc; border-top-color:#0d6efd; border-radius:50%; animation:spin .8s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1 class="mb-3">GrafTactil — Editor gráfico</h1>
+
+    <div class="card p-3">
+      <h5>Configuración general</h5>
+      <div class="row g-2 align-items-end">
+        <div class="col-md-3">
+          <label class="form-label">Tamaño placa (mm)</label>
+          <div class="input-group">
+            <input id="fig_w" type="number" class="form-control" value="173" min="10">
+            <input id="fig_h" type="number" class="form-control" value="113" min="10">
+          </div>
+          <div class="small-muted">Ancho × Alto</div>
+        </div>
+        <div class="col-md-2">
+          <label class="form-label">DPI</label>
+          <input id="dpi" class="form-control" type="number" value="96">
+        </div>
+        <div class="col-md-2">
+          <label class="form-label">Grosor placa (mm)</label>
+          <input id="plate_thickness_mm" class="form-control" type="number" step="0.1" value="0.8">
+        </div>
+        <div class="col-md-2">
+          <label class="form-label">Altura marcador (mm)</label>
+          <input id="marker_height_mm" class="form-control" type="number" step="0.1" value="0.8">
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Export filename</label>
+          <input id="output_filename" class="form-control" type="text" value="grafica_export.stl">
+        </div>
+      </div>
+      <div class="form-check form-switch mt-2">
+        <input class="form-check-input" type="checkbox" id="only_markers" checked>
+        <label class="form-check-label" for="only_markers">Solo marcadores (ocultar curvas)</label>
+      </div>
+    </div>
+
+    <div class="card p-3">
+      <div class="d-flex justify-content-between align-items-center">
+        <h5 class="mb-0">Funciones (marcadores)</h5>
+        <div>
+          <button id="addFn" class="btn btn-sm btn-primary">Agregar función</button>
+        </div>
+      </div>
+
+      <div id="functionsList" class="mt-3"></div>
+      <template id="fnTemplate">
+        <div class="row align-items-end function-row">
+          <div class="col-md-4">
+            <label class="form-label">Expresión (x)</label>
+            <input class="form-control fn-expr" placeholder="ej: x, x**2, sin(x)" value="x">
+            <div class="small-muted">Usa funciones estándar: sin, cos, exp, log, etc.</div>
+          </div>
+          <div class="col-md-2">
+            <label class="form-label">Marcadores (N)</label>
+            <input class="form-control fn-density" type="number" value="20" min="0">
+            <div class="small-muted">Número total de marcadores uniformes</div>
+          </div>
+          <div class="col-md-2">
+            <label class="form-label">Forma</label>
+            <select class="form-select fn-shape">
+              <option value="o" selected>Círculo</option>
+              <option value="s">Cuadrado</option>
+              <option value="^">Triángulo</option>
+            </select>
+          </div>
+          <div class="col-md-2">
+            <label class="form-label">Tamaño (mm)</label>
+            <input class="form-control fn-size" type="number" step="0.1" value="3.0" min="0.5">
+          </div>
+          <div class="col-md-1">
+            <button class="btn btn-danger remove-fn">Eliminar</button>
+          </div>
+        </div>
+      </template>
+    </div>
+
+    <div class="d-flex gap-2 mt-3">
+      <button id="previewBtn" class="btn btn-success">Previsualizar / Generar</button>
+      <button id="resetBtn" class="btn btn-outline-secondary">Reset</button>
+      <div id="status" class="align-self-center small-muted"></div>
+    </div>
+
+    <div class="row mt-3">
+      <div class="col-md-6">
+        <div id="preview"></div>
+      </div>
+      <div class="col-md-6">
+        <div class="card p-2">
+          <h6 class="mb-2">Visor 3D</h6>
+          <div id="viewer"></div>
+          <div class="mt-2 d-flex justify-content-between">
+            <div id="viewerStatus" class="small-muted"></div>
+            <div>
+              <button id="resetView" class="btn btn-sm btn-outline-secondary">Reset cámara</button>
+              <a id="downloadStlBtn" class="btn btn-sm btn-primary" href="#" target="_blank" style="display:none;">Descargar STL</a>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="rawJson" style="display:none;"></div>
+  </div>
+
+<script>
+/* UI management (non-module) */
+const functionsList = document.getElementById('functionsList');
+const template = document.getElementById('fnTemplate');
+
+function addFunctionRow(expr='x', density=20, shape='o', size=3.0) {
+  const node = document.createElement('div');
+  node.className = 'card p-3 mt-2';
+  node.innerHTML = template.innerHTML;
+  const inputExpr = node.querySelector('.fn-expr');
+  const inputDen = node.querySelector('.fn-density');
+  const inputShape = node.querySelector('.fn-shape');
+  const inputSize = node.querySelector('.fn-size');
+  inputExpr.value = expr;
+  inputDen.value = density;
+  inputShape.value = shape;
+  inputSize.value = size;
+  node.querySelector('.remove-fn').onclick = () => node.remove();
+  functionsList.appendChild(node);
+}
+
+function resetDefaults() {
+  functionsList.innerHTML = '';
+  addFunctionRow('x', 20, 'o', 3.0);
+  addFunctionRow('x**2', 7, 's', 3.0);
+  addFunctionRow('x**3', 6, '^', 3.5);
+}
+
+document.getElementById('addFn').onclick = () => addFunctionRow();
+document.getElementById('resetBtn').onclick = () => { resetDefaults(); document.getElementById('status').textContent=''; document.getElementById('preview').innerHTML=''; };
+
+function buildConfig() {
+  const funcs = [], shapes = [], sizes = [], densities = [], segments = [];
+  const only_markers = document.getElementById('only_markers').checked;
+  for (const card of functionsList.children) {
+    const expr = card.querySelector('.fn-expr').value.trim() || 'x';
+    const den = parseInt(card.querySelector('.fn-density').value) || 0;
+    const shape = card.querySelector('.fn-shape').value;
+    const size = parseFloat(card.querySelector('.fn-size').value) || 3.0;
+    funcs.push(expr); shapes.push(shape); sizes.push(size);
+    densities.push([den]);
+    segments.push([[-5.5, 5.5]]);
+  }
+
+  return {
+    functions: funcs,
+    labels: funcs.map(f=>f),
+    curve_styles: funcs.map(()=>'-'),
+    curve_linewidths: funcs.map(()=>1.0),
+    marker_shapes: shapes,
+    marker_sizes: sizes,
+    marker_segments: segments,
+    marker_densities: densities,
+    fig_size_mm: [ parseFloat(document.getElementById('fig_w').value), parseFloat(document.getElementById('fig_h').value) ],
+    dpi: parseInt(document.getElementById('dpi').value) || 96,
+    auto_limits: true,
+    step_mm: 7.45,
+    tick_step: 0.5,
+    plate_thickness_mm: parseFloat(document.getElementById('plate_thickness_mm').value) || 0.8,
+    marker_height_mm: parseFloat(document.getElementById('marker_height_mm').value) || 0.8,
+    output_filename: document.getElementById('output_filename').value || 'grafica_export.stl',
+    only_markers: only_markers,
+    mm_per_inch: 23.4555555,
+    save_pdf: false
+  };
+}
+
+/* Generate + viewer integration */
+document.getElementById('previewBtn').onclick = async () => {
+  const status = document.getElementById('status');
+  const viewerStatus = document.getElementById('viewerStatus');
+  status.textContent = 'Generando...';
+  viewerStatus.textContent = '';
+  const cfg = buildConfig();
+
+  try {
+    const resp = await fetch('/generate', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(cfg)
+    });
+    const json = await resp.json();
+    if (!resp.ok) {
+      status.textContent = 'Error: ' + (json.error || JSON.stringify(json));
+      return;
+    }
+    status.textContent = 'Export iniciado.';
+    document.getElementById('rawJson').textContent = JSON.stringify(json, null, 2);
+
+    // show preview SVG if available
+    const previewDiv = document.getElementById('preview');
+    previewDiv.innerHTML = '';
+    if (json.preview_svg) {
+      previewDiv.innerHTML = `<div class="card p-3"><h6>Previsualización</h6><img src="${json.preview_svg}" alt="preview"></div>`;
+    }
+
+    // Try to load STL into 3D viewer (polling retry if not ready)
+    if (json.stl) {
+      document.getElementById('downloadStlBtn').href = json.stl;
+      document.getElementById('downloadStlBtn').style.display = '';
+      viewerStatus.innerHTML = '<span class="loader"></span> Cargando STL...';
+      await loadSTLWithRetry(json.stl, 12, 1000);
+      viewerStatus.textContent = '';
+    }
+
+  } catch (err) {
+    document.getElementById('status').textContent = 'Error de conexión: ' + err.message;
+  }
+};
+
+/* keep rawJson hidden; used for debug only */
+document.getElementById('rawJson').style.display = 'none';
+resetDefaults();
+</script>
+
+<!-- Three.js module: viewer, STL loader, OrbitControls -->
+<script type="module">
+  import * as THREE from 'https://unpkg.com/three@0.152.2/build/three.module.js';
+  import { STLLoader } from 'https://unpkg.com/three@0.152.2/examples/jsm/loaders/STLLoader.js';
+  import { OrbitControls } from 'https://unpkg.com/three@0.152.2/examples/jsm/controls/OrbitControls.js';
+
+  const container = document.getElementById('viewer');
+  let renderer, scene, camera, controls, currentMesh, hemiLight, dirLight;
+
+  function initViewer() {
+    // renderer
+    renderer = new THREE.WebGLRenderer({ antialias:true });
+    renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.setSize(container.clientWidth, container.clientHeight, false);
+    container.innerHTML = '';
+    container.appendChild(renderer.domElement);
+
+    // scene + camera
+    scene = new THREE.Scene();
+    scene.background = new THREE.Color(0xf0f4fa);
+    const aspect = container.clientWidth / Math.max(1, container.clientHeight);
+    camera = new THREE.PerspectiveCamera(45, aspect, 0.1, 2000);
+    camera.position.set(200, 200, 200);
+
+    // lights
+    hemiLight = new THREE.HemisphereLight(0xffffff, 0x444444, 0.8);
+    hemiLight.position.set(0, 200, 0);
+    scene.add(hemiLight);
+    dirLight = new THREE.DirectionalLight(0xffffff, 0.6);
+    dirLight.position.set(100, 100, 100);
+    scene.add(dirLight);
+
+    // grid + axes
+    const grid = new THREE.GridHelper(500, 20, 0xdddddd, 0xeeeeee);
+    grid.material.opacity = 0.6; grid.material.transparent = true;
+    scene.add(grid);
+
+    // controls
+    controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.1;
+
+    window.addEventListener('resize', onWindowResize);
+    animate();
+  }
+
+  function onWindowResize() {
+    if (!container) return;
+    renderer.setSize(container.clientWidth, container.clientHeight, false);
+    camera.aspect = container.clientWidth / Math.max(1, container.clientHeight);
+    camera.updateProjectionMatrix();
+  }
+
+  function animate() {
+    requestAnimationFrame(animate);
+    controls.update();
+    renderer.render(scene, camera);
+  }
+
+  function clearMesh() {
+    if (!currentMesh) return;
+    scene.remove(currentMesh);
+    if (currentMesh.geometry) currentMesh.geometry.dispose();
+    if (currentMesh.material) {
+      if (Array.isArray(currentMesh.material)) currentMesh.material.forEach(m => m.dispose && m.dispose());
+      else currentMesh.material.dispose && currentMesh.material.dispose();
+    }
+    currentMesh = null;
+  }
+
+  async function loadSTL(url) {
+    return new Promise((resolve, reject) => {
+      const loader = new STLLoader();
+      loader.load(url, (geometry) => {
+        // center geometry
+        geometry.computeBoundingBox();
+        const bbox = geometry.boundingBox;
+        const size = new THREE.Vector3();
+        bbox.getSize(size);
+        const center = new THREE.Vector3();
+        bbox.getCenter(center);
+
+        // scale to fit if very large
+        const maxDim = Math.max(size.x, size.y, size.z);
+        let scale = 1;
+        if (maxDim > 500) scale = 500 / maxDim;
+
+        geometry.translate(-center.x, -center.y, -bbox.min.z); // put base on z=0
+        geometry.scale(scale, scale, scale);
+
+        const material = new THREE.MeshPhongMaterial({ color: 0x1f77b4, specular: 0x111111, shininess: 60 });
+        const mesh = new THREE.Mesh(geometry, material);
+        clearMesh();
+        currentMesh = mesh;
+        scene.add(mesh);
+
+        // adjust camera to fit mesh
+        const box = new THREE.Box3().setFromObject(mesh);
+        const boxSize = box.getSize(new THREE.Vector3()).length();
+        const boxCenter = box.getCenter(new THREE.Vector3());
+        const halfSizeToFitOnScreen = boxSize * 0.5;
+        const dist = halfSizeToFitOnScreen / Math.tan((camera.fov * Math.PI) / 360);
+        const dir = (new THREE.Vector3()).subVectors(camera.position, boxCenter).normalize();
+        camera.position.copy(dir.multiplyScalar(dist).add(boxCenter));
+        camera.near = boxSize / 100;
+        camera.far = boxSize * 100;
+        camera.updateProjectionMatrix();
+        controls.target.copy(boxCenter);
+        controls.update();
+
+        resolve();
+      }, undefined, (err) => {
+        reject(err);
+      });
+    });
+  }
+
+  async function sleep(ms){ return new Promise(r=>setTimeout(r, ms)); }
+
+  async function loadSTLWithRetry(url, attempts=8, delay=1000) {
+    let lastErr = null;
+    for (let i=0;i<attempts;i++) {
+      try {
+        await loadSTL(url);
+        return;
+      } catch (e) {
+        lastErr = e;
+        // if 404 or network issue, wait and retry
+        await sleep(delay);
+      }
+    }
+    // failed after attempts
+    document.getElementById('viewerStatus').textContent = 'No se pudo cargar STL. Intenta descargar manualmente.';
+    throw lastErr;
+  }
+
+  document.getElementById('resetView').addEventListener('click', () => {
+    if (!camera || !controls) return;
+    camera.position.set(200,200,200);
+    controls.target.set(0,0,0);
+    controls.update();
+  });
+
+  // init on load
+  initViewer();
+</script>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
+```<!-- filepath: /home/ubutiostark/Braille_Project/graftactil_starter/static/index.html -->
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>GrafTactil — Editor gráfico</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    body { padding: 18px; background:#f7f9fc; }
+    .card { margin-bottom:12px; }
+    .function-row { gap:10px; }
+    #preview img { max-width:100%; border:1px solid #ddd; background:#fff; padding:6px; }
+    .small-muted { font-size:0.85rem; color:#6c757d; }
+    #viewer { width:100%; height:480px; background:#e9eef6; border:1px solid #ddd; }
+    .loader { display:inline-block; width:18px; height:18px; border:2px solid #ccc; border-top-color:#0d6efd; border-radius:50%; animation:spin .8s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1 class="mb-3">GrafTactil — Editor gráfico</h1>
+
+    <div class="card p-3">
+      <h5>Configuración general</h5>
+      <div class="row g-2 align-items-end">
+        <div class="col-md-3">
+          <label class="form-label">Tamaño placa (mm)</label>
+          <div class="input-group">
+            <input id="fig_w" type="number" class="form-control" value="173" min="10">
+            <input id="fig_h" type="number" class="form-control" value="113" min="10">
+          </div>
+          <div class="small-muted">Ancho × Alto</div>
+        </div>
+        <div class="col-md-2">
+          <label class="form-label">DPI</label>
+          <input id="dpi" class="form-control" type="number" value="96">
+        </div>
+        <div class="col-md-2">
+          <label class="form-label">Grosor placa (mm)</label>
+          <input id="plate_thickness_mm" class="form-control" type="number" step="0.1" value="0.8">
+        </div>
+        <div class="col-md-2">
+          <label class="form-label">Altura marcador (mm)</label>
+          <input id="marker_height_mm" class="form-control" type="number" step="0.1" value="0.8">
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Export filename</label>
+          <input id="output_filename" class="form-control" type="text" value="grafica_export.stl">
+        </div>
+      </div>
+      <div class="form-check form-switch mt-2">
+        <input class="form-check-input" type="checkbox" id="only_markers" checked>
+        <label class="form-check-label" for="only_markers">Solo marcadores (ocultar curvas)</label>
+      </div>
+    </div>
+
+    <div class="card p-3">
+      <div class="d-flex justify-content-between align-items-center">
+        <h5 class="mb-0">Funciones (marcadores)</h5>
+        <div>
+          <button id="addFn" class="btn btn-sm btn-primary">Agregar función</button>
+        </div>
+      </div>
+
+      <div id="functionsList" class="mt-3"></div>
+      <template id="fnTemplate">
+        <div class="row align-items-end function-row">
+          <div class="col-md-4">
+            <label class="form-label">Expresión (x)</label>
+            <input class="form-control fn-expr" placeholder="ej: x, x**2, sin(x)" value="x">
+            <div class="small-muted">Usa funciones estándar: sin, cos, exp, log, etc.</div>
+          </div>
+          <div class="col-md-2">
+            <label class="form-label">Marcadores (N)</label>
+            <input class="form-control fn-density" type="number" value="20" min="0">
+            <div class="small-muted">Número total de marcadores uniformes</div>
+          </div>
+          <div class="col-md-2">
+            <label class="form-label">Forma</label>
+            <select class="form-select fn-shape">
+              <option value="o" selected>Círculo</option>
+              <option value="s">Cuadrado</option>
+              <option value="^">Triángulo</option>
+            </select>
+          </div>
+          <div class="col-md-2">
+            <label class="form-label">Tamaño (mm)</label>
+            <input class="form-control fn-size" type="number" step="0.1" value="3.0" min="0.5">
+          </div>
+          <div class="col-md-1">
+            <button class="btn btn-danger remove-fn">Eliminar</button>
+          </div>
+        </div>
+      </template>
+    </div>
+
+    <div class="d-flex gap-2 mt-3">
+      <button id="previewBtn" class="btn btn-success">Previsualizar / Generar</button>
+      <button id="resetBtn" class="btn btn-outline-secondary">Reset</button>
+      <div id="status" class="align-self-center small-muted"></div>
+    </div>
+
+    <div class="row mt-3">
+      <div class="col-md-6">
+        <div id="preview"></div>
+      </div>
+      <div class="col-md-6">
+        <div class="card p-2">
+          <h6 class="mb-2">Visor 3D</h6>
+          <div id="viewer"></div>
+          <div class="mt-2 d-flex justify-content-between">
+            <div id="viewerStatus" class="small-muted"></div>
+            <div>
+              <button id="resetView" class="btn btn-sm btn-outline-secondary">Reset cámara</button>
+              <a id="downloadStlBtn" class="btn btn-sm btn-primary" href="#" target="_blank" style="display:none;">Descargar STL</a>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="rawJson" style="display:none;"></div>
+  </div>
+
+<script>
+/* UI management (non-module) */
+const functionsList = document.getElementById('functionsList');
+const template = document.getElementById('fnTemplate');
+
+function addFunctionRow(expr='x', density=20, shape='o', size=3.0) {
+  const node = document.createElement('div');
+  node.className = 'card p-3 mt-2';
+  node.innerHTML = template.innerHTML;
+  const inputExpr = node.querySelector('.fn-expr');
+  const inputDen = node.querySelector('.fn-density');
+  const inputShape = node.querySelector('.fn-shape');
+  const inputSize = node.querySelector('.fn-size');
+  inputExpr.value = expr;
+  inputDen.value = density;
+  inputShape.value = shape;
+  inputSize.value = size;
+  node.querySelector('.remove-fn').onclick = () => node.remove();
+  functionsList.appendChild(node);
+}
+
+function resetDefaults() {
+  functionsList.innerHTML = '';
+  addFunctionRow('x', 20, 'o', 3.0);
+  addFunctionRow('x**2', 7, 's', 3.0);
+  addFunctionRow('x**3', 6, '^', 3.5);
+}
+
+document.getElementById('addFn').onclick = () => addFunctionRow();
+document.getElementById('resetBtn').onclick = () => { resetDefaults(); document.getElementById('status').textContent=''; document.getElementById('preview').innerHTML=''; };
+
+function buildConfig() {
+  const funcs = [], shapes = [], sizes = [], densities = [], segments = [];
+  const only_markers = document.getElementById('only_markers').checked;
+  for (const card of functionsList.children) {
+    const expr = card.querySelector('.fn-expr').value.trim() || 'x';
+    const den = parseInt(card.querySelector('.fn-density').value) || 0;
+    const shape = card.querySelector('.fn-shape').value;
+    const size = parseFloat(card.querySelector('.fn-size').value) || 3.0;
+    funcs.push(expr); shapes.push(shape); sizes.push(size);
+    densities.push([den]);
+    segments.push([[-5.5, 5.5]]);
+  }
+
+  return {
+    functions: funcs,
+    labels: funcs.map(f=>f),
+    curve_styles: funcs.map(()=>'-'),
+    curve_linewidths: funcs.map(()=>1.0),
+    marker_shapes: shapes,
+    marker_sizes: sizes,
+    marker_segments: segments,
+    marker_densities: densities,
+    fig_size_mm: [ parseFloat(document.getElementById('fig_w').value), parseFloat(document.getElementById('fig_h').value) ],
+    dpi: parseInt(document.getElementById('dpi').value) || 96,
+    auto_limits: true,
+    step_mm: 7.45,
+    tick_step: 0.5,
+    plate_thickness_mm: parseFloat(document.getElementById('plate_thickness_mm').value) || 0.8,
+    marker_height_mm: parseFloat(document.getElementById('marker_height_mm').value) || 0.8,
+    output_filename: document.getElementById('output_filename').value || 'grafica_export.stl',
+    only_markers: only_markers,
+    mm_per_inch: 23.4555555,
+    save_pdf: false
+  };
+}
+
+/* Generate + viewer integration */
+document.getElementById('previewBtn').onclick = async () => {
+  const status = document.getElementById('status');
+  const viewerStatus = document.getElementById('viewerStatus');
+  status.textContent = 'Generando...';
+  viewerStatus.textContent = '';
+  const cfg = buildConfig();
+
+  try {
+    const resp = await fetch('/generate', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(cfg)
+    });
+    const json = await resp.json();
+    if (!resp.ok) {
+      status.textContent = 'Error: ' + (json.error || JSON.stringify(json));
+      return;
+    }
+    status.textContent = 'Export iniciado.';
+    document.getElementById('rawJson').textContent = JSON.stringify(json, null, 2);
+
+    // show preview SVG if available
+    const previewDiv = document.getElementById('preview');
+    previewDiv.innerHTML = '';
+    if (json.preview_svg) {
+      previewDiv.innerHTML = `<div class="card p-3"><h6>Previsualización</h6><img src="${json.preview_svg}" alt="preview"></div>`;
+    }
+
+    // Try to load STL into 3D viewer (polling retry if not ready)
+    if (json.stl) {
+      document.getElementById('downloadStlBtn').href = json.stl;
+      document.getElementById('downloadStlBtn').style.display = '';
+      viewerStatus.innerHTML = '<span class="loader"></span> Cargando STL...';
+      await loadSTLWithRetry(json.stl, 12, 1000);
+      viewerStatus.textContent = '';
+    }
+
+  } catch (err) {
+    document.getElementById('status').textContent = 'Error de conexión: ' + err.message;
+  }
+};
+
+/* keep rawJson hidden; used for debug only */
+document.getElementById('rawJson').style.display = 'none';
+resetDefaults();
+</script>
+
+<!-- Three.js module: viewer, STL loader, OrbitControls -->
+<script type="module">
+  import * as THREE from 'https://unpkg.com/three@0.152.2/build/three.module.js';
+  import { STLLoader } from 'https://unpkg.com/three@0.152.2/examples/jsm/loaders/STLLoader.js';
+  import { OrbitControls } from 'https://unpkg.com/three@0.152.2/examples/jsm/controls/OrbitControls.js';
+
+  const container = document.getElementById('viewer');
+  let renderer, scene, camera, controls, currentMesh, hemiLight, dirLight;
+
+  function initViewer() {
+    // renderer
+    renderer = new THREE.WebGLRenderer({ antialias:true });
+    renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.setSize(container.clientWidth, container.clientHeight, false);
+    container.innerHTML = '';
+    container.appendChild(renderer.domElement);
+
+    // scene + camera
+    scene = new THREE.Scene();
+    scene.background = new THREE.Color(0xf0f4fa);
+    const aspect = container.clientWidth / Math.max(1, container.clientHeight);
+    camera = new THREE.PerspectiveCamera(45, aspect, 0.1, 2000);
+    camera.position.set(200, 200, 200);
+
+    // lights
+    hemiLight = new THREE.HemisphereLight(0xffffff, 0x444444, 0.8);
+    hemiLight.position.set(0, 200, 0);
+    scene.add(hemiLight);
+    dirLight = new THREE.DirectionalLight(0xffffff, 0.6);
+    dirLight.position.set(100, 100, 100);
+    scene.add(dirLight);
+
+    // grid + axes
+    const grid = new THREE.GridHelper(500, 20, 0xdddddd, 0xeeeeee);
+    grid.material.opacity = 0.6; grid.material.transparent = true;
+    scene.add(grid);
+
+    // controls
+    controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.1;
+
+    window.addEventListener('resize', onWindowResize);
+    animate();
+  }
+
+  function onWindowResize() {
+    if (!container) return;
+    renderer.setSize(container.clientWidth, container.clientHeight, false);
+    camera.aspect = container.clientWidth / Math.max(1, container.clientHeight);
+    camera.updateProjectionMatrix();
+  }
+
+  function animate() {
+    requestAnimationFrame(animate);
+    controls.update();
+    renderer.render(scene, camera);
+  }
+
+  function clearMesh() {
+    if (!currentMesh) return;
+    scene.remove(currentMesh);
+    if (currentMesh.geometry) currentMesh.geometry.dispose();
+    if (currentMesh.material) {
+      if (Array.isArray(currentMesh.material)) currentMesh.material.forEach(m => m.dispose && m.dispose());
+      else currentMesh.material.dispose && currentMesh.material.dispose();
+    }
+    currentMesh = null;
+  }
+
+  async function loadSTL(url) {
+    return new Promise((resolve, reject) => {
+      const loader = new STLLoader();
+      loader.load(url, (geometry) => {
+        // center geometry
+        geometry.computeBoundingBox();
+        const bbox = geometry.boundingBox;
+        const size = new THREE.Vector3();
+        bbox.getSize(size);
+        const center = new THREE.Vector3();
+        bbox.getCenter(center);
+
+        // scale to fit if very large
+        const maxDim = Math.max(size.x, size.y, size.z);
+        let scale = 1;
+        if (maxDim > 500) scale = 500 / maxDim;
+
+        geometry.translate(-center.x, -center.y, -bbox.min.z); // put base on z=0
+        geometry.scale(scale, scale, scale);
+
+        const material = new THREE.MeshPhongMaterial({ color: 0x1f77b4, specular: 0x111111, shininess: 60 });
+        const mesh = new THREE.Mesh(geometry, material);
+        clearMesh();
+        currentMesh = mesh;
+        scene.add(mesh);
+
+        // adjust camera to fit mesh
+        const box = new THREE.Box3().setFromObject(mesh);
+        const boxSize = box.getSize(new THREE.Vector3()).length();
+        const boxCenter = box.getCenter(new THREE.Vector3());
+        const halfSizeToFitOnScreen = boxSize * 0.5;
+        const dist = halfSizeToFitOnScreen / Math.tan((camera.fov * Math.PI) / 360);
+        const dir = (new THREE.Vector3()).subVectors(camera.position, boxCenter).normalize();
+        camera.position.copy(dir.multiplyScalar(dist).add(boxCenter));
+        camera.near = boxSize / 100;
+        camera.far = boxSize * 100;
+        camera.updateProjectionMatrix();
+        controls.target.copy(boxCenter);
+        controls.update();
+
+        resolve();
+      }, undefined, (err) => {
+        reject(err);
+      });
+    });
+  }
+
+  async function sleep(ms){ return new Promise(r=>setTimeout(r, ms)); }
+
+  async function loadSTLWithRetry(url, attempts=8, delay=1000) {
+    let lastErr = null;
+    for (let i=0;i<attempts;i++) {
+      try {
+        await loadSTL(url);
+        return;
+      } catch (e) {
+        lastErr = e;
+        // if 404 or network issue, wait and retry
+        await sleep(delay);
+      }
+    }
+    // failed after attempts
+    document.getElementById('viewerStatus').textContent = 'No se pudo cargar STL. Intenta descargar manualmente.';
+    throw lastErr;
+  }
+
+  document.getElementById('resetView').addEventListener('click', () => {
+    if (!camera || !controls) return;
+    camera.position.set(200,200,200);
+    controls.target.set(0,0,0);
+    controls.update();
+  });
+
+  // init on load
+  initViewer();
+</script>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

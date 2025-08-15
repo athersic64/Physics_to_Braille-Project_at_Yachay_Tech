@@ -1,0 +1,42 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>GrafTactil - Editor</title></head>
+<body>
+<h3>GrafTactil - Editor simple</h3>
+<textarea id="config" rows="20" cols="80">{
+  "functions": ["x","x**2","x**3"],
+  "marker_segments": [[[ -5.5, -3.5 ],[ -3.5, 3.5 ],[ 3.5, 5.5 ]], [[[ -5.5, -2 ],[ -2, -1 ],[ -1, 1 ],[ 1, 2 ],[ 2, 5.5 ]]] , ...],
+  "marker_densities": [[0,20,0],[0,7,7,7,0],[0,6,4,3,4,6,0]],
+  "marker_shapes": ["o","s","^"],
+  "marker_sizes": [3.0,3.0,3.5],
+  "fig_size_mm":[173,113],
+  "dpi":96,
+  "auto_limits": true,
+  "step_mm":7.45,
+  "tick_step":0.5,
+  "plate_thickness_mm":0.8,
+  "marker_height_mm":0.8,
+  "output_filename":"out.stl",
+  "only_markers": true
+}</textarea>
+<br>
+<button id="send">Generar</button>
+<div id="result"></div>
+<script>
+document.getElementById('send').onclick = async () => {
+  const cfg = JSON.parse(document.getElementById('config').value);
+  const res = await fetch('/generate', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(cfg) });
+  const j = await res.json();
+  const out = document.getElementById('result');
+  out.innerHTML = '';
+  if (j.preview_svg) {
+    out.innerHTML += `<div><img src="${j.preview_svg}" style="max-width:600px"></div>`;
+  }
+  if (j.stl) {
+    out.innerHTML += `<div><a href="${j.stl}" target="_blank">Descargar STL</a></div>`;
+  }
+  out.innerHTML += `<pre>${JSON.stringify(j,null,2)}</pre>`;
+};
+</script>
+</body>
+</html>
