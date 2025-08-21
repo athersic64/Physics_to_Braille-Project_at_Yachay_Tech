@@ -1,7 +1,0 @@
-fastapi
-uvicorn[standard]
-trimesh
-shapely
-matplotlib
-sympy
-numpy

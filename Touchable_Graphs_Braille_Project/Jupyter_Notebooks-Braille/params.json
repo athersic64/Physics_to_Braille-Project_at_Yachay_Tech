@@ -1,0 +1,29 @@
+{
+  "fig_size_mm": [173.0, 113.0],
+  "mm_per_inch": 23.4555555,
+  "xlim": [-7.0, 7.0],
+  "ylim": [-7.0, 7.0],
+  "tick_step": 0.5,
+  "grid_stroke_mm": 0.25,
+  "axis_stroke_mm": 0.6,
+  "curve_stroke_mm": 0.9,
+  "marker_edge_stroke_mm": 0.2,
+  "marker_shapes": ["o", "s", "^"],
+  "marker_sizes_mm": [3.0, 3.0, 3.5],
+  "functions": ["x", "x**2", "x**3"],
+  "curve_styles": ["solid", "dash", "dot"],
+  "n_curve_samples": 800,
+  "marker_xs": "adaptive_default",
+  "braille_labels": [
+    {
+      "text": "Figura 1",
+      "position_mm": [-70.0, -50.0],
+      "dot_diameter_mm": 1.5,
+      "dot_height_mm": 0.8,
+      "dot_spacing_mm": 2.5,
+      "char_spacing_mm": 3.0,
+      "line_spacing_mm": 4.0
+    }
+  ],
+  "output_svg": "A5_output_layers_from_params.svg"
+}
